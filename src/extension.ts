@@ -1,8 +1,9 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT license.
 
-import { Extension, ExtensionContext, extensions } from "vscode";
-import { dispose as disposeTelemetryWrapper, initializeFromJsonFile, instrumentOperation } from "vscode-extension-telemetry-wrapper";
+import { commands, Event, Extension, ExtensionContext, extensions, Uri } from "vscode";
+import { dispose as disposeTelemetryWrapper, initializeFromJsonFile, instrumentOperation, instrumentOperationAsVsCodeCommand } from "vscode-extension-telemetry-wrapper";
+import { Commands } from "./commands";
 import { Context } from "./constants";
 import { contextManager } from "./contextManager";
 import { LibraryController } from "./controllers/libraryController";
@@ -17,6 +18,37 @@ export async function activate(context: ExtensionContext): Promise<any> {
 }
 
 async function activateExtension(_operationId: string, context: ExtensionContext): Promise<void> {
+    const extension: Extension<any> | undefined = extensions.getExtension("redhat.java");
+    if (extension && extension.isActive) {
+        const extensionApi: any = extension.exports;
+        if (!extensionApi) {
+            return;
+        }
+
+        serverMode = extensionApi.serverMode;
+
+        if (extensionApi.onDidClasspathUpdate) {
+            const onDidClasspathUpdate: Event<Uri> = extensionApi.onDidClasspathUpdate;
+            context.subscriptions.push(onDidClasspathUpdate(async () => {
+                await commands.executeCommand(Commands.VIEW_PACKAGE_REFRESH, /* debounce = */true);
+            }));
+        }
+
+        if (extensionApi.onDidServerModeChange) {
+            const onDidServerModeChange: Event<string> = extensionApi.onDidServerModeChange;
+            context.subscriptions.push(onDidServerModeChange(async (mode: string) => {
+                serverMode = mode;
+            }));
+        }
+
+        if (extensionApi.onDidProjectsImport) {
+            const onDidProjectsImport: Event<Uri[]> = extensionApi.onDidProjectsImport;
+            context.subscriptions.push(onDidProjectsImport(async () => {
+                commands.executeCommand(Commands.VIEW_PACKAGE_REFRESH, /* debounce = */true);
+            }));
+        }
+    }
+
     Settings.initialize(context);
     contextManager.initialize(context);
     setMavenExtensionState();
@@ -28,6 +60,15 @@ async function activateExtension(_operationId: string, context: ExtensionContext
     contextManager.setContextValue(Context.EXTENSION_ACTIVATED, true);
 
     initExpService(context);
+
+    context.subscriptions.push(instrumentOperationAsVsCodeCommand("java.dependency.switch.server.mode", async () => {
+        if (serverMode === "switching") {
+            return;
+        }
+        await commands.executeCommand("java.server.mode.switch");
+        serverMode = "switching";
+        commands.executeCommand(Commands.VIEW_PACKAGE_REFRESH, /* debounce = */false);
+    }));
 }
 
 // determine if the add dependency shortcut will show or not
@@ -47,3 +88,5 @@ function setMavenExtensionState() {
 export async function deactivate() {
     await disposeTelemetryWrapper();
 }
+
+export let serverMode: string | undefined;
