@@ -26,12 +26,4 @@ export class LightWeightNode extends ExplorerNode {
     public getChildren(): ProviderResult<ExplorerNode[]> {
         return null;
     }
-
-    protected get contextValue(): string {
-        return undefined;
-    }
-
-    protected get iconPath(): ThemeIcon {
-        return new ThemeIcon("info");
-    }
 }
